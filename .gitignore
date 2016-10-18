@@ -25,7 +25,11 @@ _testmain.go
 
 .DS_Store
 
-# ignore config-info files
+# ignore config/output info files
 *.json
 *.toml
 *.yaml
+*.xml
+
+# ignore built executable
+ephor

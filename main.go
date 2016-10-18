@@ -23,7 +23,6 @@ var (
 )
 
 const ERROR_USER_INPUT int = 0x1
-const NEW_FILE_PERMISSIONS int = 0644
 
 const DEFAULT_CONFIG_NAME string = "config"
 const API_SEARCH_ENDPOINT string = "/services/search/jobs/export"
@@ -35,7 +34,6 @@ func main() {
 			fmt.Fprintf(os.Stdout, "No query provided: execution is complete\n")
 			return
 		}
-
 		requestVals := url.Values{}
 		requestVals.Add("search", "search "+query)
 		requestVals.Add("output_mode", output)
@@ -47,11 +45,10 @@ func main() {
 		request, _ := http.NewRequest("POST", requestURL, bytes.NewBufferString(requestVals.Encode()))
 		request.SetBasicAuth(un, pw)
 		resp, err := client.Do(request)
-		if err != nil {
-			panic(err)
-		}
+		checkError(err)
 		defer resp.Body.Close()
 		body, err := ioutil.ReadAll(resp.Body)
+		checkError(err)
 
 		if file != "" {
 			ioutil.WriteFile(file, body, 0644)
@@ -59,14 +56,62 @@ func main() {
 			// output file not specified; print to console
 			fmt.Fprintln(os.Stdout, string(body))
 		}
-
-		fmt.Println("DONE!")
 	} else {
 		// run the console in interactive mode
-		runConsole()
+		consoleRun()
+	}
+	return
+}
+
+/* Check for an error and panic if it exists
+ * @params - e: a error (usually returned from some function) to check
+ * @return - none
+ */
+func checkError(e error) {
+	if e != nil {
+		panic(e)
 	}
 
 	return
+}
+
+/* Prints the help command for use in the console
+ * @params - none
+ * @return - none
+ */
+func consoleHelp() {
+	fmt.Println("Ephor Console Commands:")
+	fmt.Println("  exit			Exits the console.")
+	fmt.Println("  help			Prints this help message.")
+}
+
+/* Runs the console for interactive mode. This function loops, executing each
+ * command as it is received, until it breaks or receives an 'exit' command.
+ * @params - none
+ * @return - none
+ */
+func consoleRun() {
+	// create the client connection
+	fmt.Printf("Connecting to splunk instance '%s'... ", urlAddr)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+	fmt.Println("connected.")
+	for {
+		fmt.Print("ephor > ")
+		r := bufio.NewReader(os.Stdin)
+		in, _ := r.ReadString('\n')
+		consoleCmd := strings.Split(strings.TrimSuffix(in, "\n"), " ")
+		switch consoleCmd[0] {
+		case "exit":
+			return
+		case "test":
+			fmt.Println(client)
+		default:
+			consoleHelp()
+		}
+	}
 }
 
 /* This init function handles the parsing of the commandline flags and the
@@ -131,23 +176,5 @@ func init() {
 	if !strings.EqualFold("XML", output) && !strings.EqualFold("JSON", output) && !strings.EqualFold("CSV", output) {
 		fmt.Fprintf(os.Stderr, "ERROR: output format ('%s') is invalid; valid values are XML (default), JSON, and CSV\n", output)
 		output = "xml" // splunk docs note the default datatype is XML
-	}
-}
-
-/* Runs the console for interactive mode. This function loops, executing each
- * command as it is received, until it breaks or receives an 'exit' command.
- * @params - none
- * @return - none
- */
-func runConsole() {
-	for {
-		fmt.Print("ephor > ")
-		r := bufio.NewReader(os.Stdin)
-		in, _ := r.ReadString('\n')
-		if in == "exit\n" {
-			return
-		} else {
-			// process the command input
-		}
 	}
 }

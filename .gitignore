@@ -24,3 +24,8 @@ _testmain.go
 *.prof
 
 .DS_Store
+
+# ignore config-info files
+*.json
+*.toml
+*.yaml

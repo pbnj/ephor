@@ -31,11 +31,11 @@ func main() {
 	if !inter {
 		// check for the query
 		if query == "" {
-			fmt.Fprintf(os.Stdout, "No query provided: execution is complete\n")
+			fmt.Fprintf(os.Stdout, "No query provided: execution is complete.\n")
 			return
 		}
 		requestVals := url.Values{}
-		requestVals.Add("search", "search "+query)
+		requestVals.Add("search", fmt.Sprintf("search %s", query))
 		requestVals.Add("output_mode", output)
 		requestURL := fmt.Sprintf("%s:%s%s", strings.TrimSuffix(urlAddr, "/"), port, API_SEARCH_ENDPOINT)
 		tr := &http.Transport{
@@ -53,7 +53,6 @@ func main() {
 		if file != "" {
 			ioutil.WriteFile(file, body, 0644)
 		} else {
-			// output file not specified; print to console
 			fmt.Fprintln(os.Stdout, string(body))
 		}
 	} else {
@@ -71,12 +70,10 @@ func checkError(e error) {
 	if e != nil {
 		panic(e)
 	}
-
-	return
 }
 
 /* Prints the 'help' output for use in the console; this should print any time
- * the user inputs an incorrect command
+ * the user inputs an incorrect command.
  * @params - none
  * @return - none
  */
@@ -98,7 +95,7 @@ func consoleHelp() {
  */
 func consoleRun() {
 	// create the client connection
-	fmt.Printf("Connecting to splunk instance '%s'... ", urlAddr)
+	fmt.Printf("Connecting to splunk instance at '%s'... ", urlAddr)
 	// tr := &http.Transport{
 	// 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	// }
@@ -111,7 +108,16 @@ func consoleRun() {
 		consoleCmd := strings.Split(strings.TrimSuffix(in, "\n"), " ")
 		switch consoleCmd[0] {
 		case "config":
-
+			if len(consoleCmd) != 2 {
+				consoleUsage()
+			} else {
+				fmt.Printf("Reloading config info from '%s'... ", consoleCmd[1])
+				//TODO: reload config file
+				fmt.Println("done.")
+				fmt.Printf("Connecting to splunk instance at '%s'... ", urlAddr)
+				//TODO: get the client
+				fmt.Println("connected.")
+			}
 		case "exit":
 			return
 		case "file":
@@ -119,18 +125,18 @@ func consoleRun() {
 				consoleUsage()
 			} else {
 				file = consoleCmd[1]
-				fmt.Println("Data will now be output to " + file)
+				fmt.Printf("Data will now be output to '%s'.\n", file)
 			}
 		case "output":
-			if len(consoleCmd) != 2 || !validOutputType(consoleCmd[1]) {
+			if len(consoleCmd) != 2 || !isValidOutputType(consoleCmd[1]) {
 				consoleUsage()
 			} else {
 				output = consoleCmd[1]
-				fmt.Println("Data will now be output as " + strings.ToUpper(output))
+				fmt.Printf("Data will now be output as %s.\n", strings.ToUpper(output))
 			}
 		case "query":
 			if file == "" {
-				fmt.Fprint(os.Stdout, "Somthing was output")
+				fmt.Fprintln(os.Stdout, "Somthing was output")
 			} else {
 				ioutil.WriteFile(file, []byte("Something was output"), 0644)
 			}
@@ -140,13 +146,25 @@ func consoleRun() {
 	}
 }
 
-/* Print a usage message and then print the consoleHelp message
+/* This function prints an incorrect usage notification and then prints the
+ * consoleHelp message output.
  * @params - none
  * @return - none
  */
 func consoleUsage() {
-	fmt.Println("Incorrect command usage - see help below")
+	fmt.Println("Incorrect command usage - see 'Help' below.")
 	consoleHelp()
+	return
+}
+
+/* This function takes a URL string and returns an HTTP client for that URL.
+ * If the client already exists, the old one is replaced when this function is
+ * called, otherwise a new client is returned.
+ * @params - //TODO
+ * @return - none
+ */
+func getClient(u string) {
+	//TODO
 }
 
 /* This init function handles the parsing of the commandline flags and the
@@ -156,47 +174,48 @@ func consoleUsage() {
  */
 func init() {
 	// parse the commandline flags
-	pflag.StringVarP(&config, "config", "c", "", "The path to a config file if it is not in your home or execution directories")
-	pflag.StringVarP(&file, "file", "f", "", "The path to a file for writing query results")
-	pflag.StringVarP(&output, "output", "o", "", "The data type for the results (valid values are XML (default), JSON, and CSV)")
-	pflag.StringVarP(&port, "port", "p", "", "The port used by the splunk server instance (if not provided, defaults to 8089)")
-	pflag.StringVarP(&query, "query", "q", "", "The search query to execute (required if not using interactive mode)")
-	pflag.StringVarP(&urlAddr, "url", "r", "", "The URL of the splunk server instance (required if not using a config file)")
-	pflag.StringVarP(&un, "username", "u", "", "The username of a splunk account (required if not using a config file)")
-	pflag.StringVarP(&pw, "password", "w", "", "The password to a splunk account (required if not using a config file)")
-	pflag.BoolVarP(&inter, "interactive", "i", false, "Use the interactive console for making multiple queries")
+	pflag.StringVarP(&config, "config", "c", "", "The path to a config file if it is not in your home or execution directories.")
+	pflag.StringVarP(&file, "file", "f", "", "The path to a file for writing query results.")
+	pflag.StringVarP(&output, "output", "o", "", "The data type for the results (valid values are XML (default), JSON, and CSV).")
+	pflag.StringVarP(&port, "port", "p", "", "The port used by the splunk server instance (if not provided, defaults to 8089).")
+	pflag.StringVarP(&query, "query", "q", "", "The search query to execute (required if not using interactive mode).")
+	pflag.StringVarP(&urlAddr, "url", "r", "", "The URL of the splunk server instance (required if not using a config file).")
+	pflag.StringVarP(&un, "username", "u", "", "The username of a splunk account (required if not using a config file).")
+	pflag.StringVarP(&pw, "password", "w", "", "The password to a splunk account (required if not using a config file).")
+	pflag.BoolVarP(&inter, "interactive", "i", false, "Use the interactive console for making multiple queries.")
 	pflag.Parse()
 
 	// get the current user context
 	u, _ := user.Current()
 
-	// setup viper config manager
-	viper.SetConfigName(DEFAULT_CONFIG_NAME)
-	viper.AddConfigPath(u.HomeDir)
-	viper.AddConfigPath(".")
 	// if a config file was passed in, parse it here
 	if config != "" {
+		viper.SetConfigName(strings.TrimSuffix(filepath.Base(config), filepath.Ext(config)))
 		p, _ := filepath.Abs(filepath.Dir(config))
 		viper.AddConfigPath(p)
-
-		e := viper.ReadInConfig()
-		if e != nil {
-			fmt.Fprintf(os.Stderr, "ERROR: a could not read a valid config file: %s\n", e.Error())
-			os.Exit(ERROR_USER_INPUT)
-		}
-		if un == "" && viper.IsSet("username") {
-			un = viper.GetString("username")
-		}
-		if pw == "" && viper.IsSet("password") {
-			pw = viper.GetString("password")
-		}
-		if urlAddr == "" && viper.IsSet("url") {
-			urlAddr = viper.GetString("url")
-		}
+	} else {
+		viper.SetConfigName(DEFAULT_CONFIG_NAME)
+		viper.AddConfigPath(u.HomeDir)
+		viper.AddConfigPath(".")
+	}
+	// ignore error return; bad config info will be caught later
+	e := viper.ReadInConfig()
+	if e != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: provided config file '%s' either does not exist or could not be read.\n", config)
+		os.Exit(ERROR_USER_INPUT)
+	}
+	if un == "" && viper.IsSet("username") {
+		un = viper.GetString("username")
+	}
+	if pw == "" && viper.IsSet("password") {
+		pw = viper.GetString("password")
+	}
+	if urlAddr == "" && viper.IsSet("url") {
+		urlAddr = viper.GetString("url")
 	}
 	// make sure minimal information has been parsed
 	if un == "" || pw == "" || urlAddr == "" {
-		fmt.Fprintf(os.Stderr, "ERROR: one or more pieces of required configuration information were not provided\n")
+		fmt.Fprintf(os.Stderr, "ERROR: one or more pieces of required configuration information were not provided.\n")
 		os.Exit(ERROR_USER_INPUT)
 	}
 
@@ -208,18 +227,20 @@ func init() {
 	if output == "" {
 		output = "xml" // splunk docs note the default datatype is XML
 	}
-	if !validOutputType(output) {
-		fmt.Fprintf(os.Stderr, "ERROR: output format ('%s') is invalid; valid values are XML (default), JSON, and CSV\n", output)
+	if !isValidOutputType(output) {
+		fmt.Fprintf(os.Stderr, "ERROR: output format ('%s') is invalid; valid values are XML (default), JSON, and CSV.\n", output)
 		output = "xml" // splunk docs note the default datatype is XML
 	}
+
+	return
 }
 
 /* Returns true if the provided string is equal to "XML", "JSON", or "CSV",
- * ignoring character case
+ * ignoring the character case of the string.
  * @params - t: a string value to validate
- * @return - a boolean indicating whether the provided sting is a valid
+ * @return - a boolean indicating whether the provided string is a valid
  * 			 output type
  */
-func validOutputType(t string) bool {
+func isValidOutputType(t string) bool {
 	return strings.EqualFold("XML", t) || strings.EqualFold("JSON", t) || strings.EqualFold("CSV", t)
 }

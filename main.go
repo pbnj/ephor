@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ogier/pflag"
@@ -22,39 +23,15 @@ var (
 	inter                                              bool
 )
 
-const ERROR_USER_INPUT int = 0x1
+const ERROR_USER_INPUT int = 0x1000
 
 const DEFAULT_CONFIG_NAME string = "config"
-const API_SEARCH_ENDPOINT string = "/services/search/jobs/export"
+const SINGLE_SEARCH_ENDPOINT string = "/services/search/jobs/export"
 
 func main() {
 	if !inter {
-		// check for the query
-		if query == "" {
-			fmt.Fprintf(os.Stdout, "No query provided: execution is complete.\n")
-			return
-		}
-		requestVals := url.Values{}
-		requestVals.Add("search", fmt.Sprintf("search %s", query))
-		requestVals.Add("output_mode", output)
-		requestURL := fmt.Sprintf("%s:%s%s", strings.TrimSuffix(urlAddr, "/"), port, API_SEARCH_ENDPOINT)
-		tr := &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-		client := &http.Client{Transport: tr}
-		request, _ := http.NewRequest("POST", requestURL, bytes.NewBufferString(requestVals.Encode()))
-		request.SetBasicAuth(un, pw)
-		resp, err := client.Do(request)
-		checkError(err)
-		defer resp.Body.Close()
-		body, err := ioutil.ReadAll(resp.Body)
-		checkError(err)
-
-		if file != "" {
-			ioutil.WriteFile(file, body, 0644)
-		} else {
-			fmt.Fprintln(os.Stdout, string(body))
-		}
+		resp := sendHTTPRequest()
+		writeHTTPResponse(file, resp)
 	} else {
 		// run the console in interactive mode
 		consoleRun()
@@ -62,30 +39,26 @@ func main() {
 	return
 }
 
-/* Check for an error and panic if it exists
- * @params - e: a error (usually returned from some function) to check
+/* Checks for an error and when there is an error, prints the message out to
+ * stderr, then exits
+ * @params - e: an error (usually returned from some function) to check
  * @return - none
  */
-func checkError(e error) {
+func checkErrorWithExit(e error) {
 	if e != nil {
-		panic(e)
+		fmt.Fprintf(os.Stderr, e.Error())
+		os.Exit(1)
 	}
 }
 
-/* Prints the 'help' output for use in the console; this should print any time
- * the user inputs an incorrect command.
- * @params - none
+/* Checks for an error and when there is an error, panics
+ * @params - e: an error (usually returned from some function) to check
  * @return - none
  */
-func consoleHelp() {
-	fmt.Println("Ephor Console Commands:")
-	fmt.Println(" config filename     Reloads the console with the specified config file.")
-	fmt.Println(" exit                Exits the Ephor console.")
-	fmt.Println(" file filename       Writes the output to the specified file.")
-	fmt.Println(" help                Prints this help message.")
-	fmt.Println(" output filetype     Changes the output file type to the specified type (XML/JSON/CSV).")
-	fmt.Println(" query querystring   Runs the specified query and outputs the results.")
-	return
+func checkErrorWithPanic(e error) {
+	if e != nil {
+		panic(e)
+	}
 }
 
 /* Runs the console for interactive mode. This function loops, executing each
@@ -94,13 +67,6 @@ func consoleHelp() {
  * @return - none
  */
 func consoleRun() {
-	// create the client connection
-	fmt.Printf("Connecting to splunk instance at '%s'... ", urlAddr)
-	// tr := &http.Transport{
-	// 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	// }
-	// client := &http.Client{Transport: tr}
-	fmt.Println("connected.")
 	for {
 		fmt.Print("ephor > ")
 		r := bufio.NewReader(os.Stdin)
@@ -109,62 +75,66 @@ func consoleRun() {
 		switch consoleCmd[0] {
 		case "config":
 			if len(consoleCmd) != 2 {
-				consoleUsage()
+				printConsoleHelp()
+				continue
+			}
+			fmt.Printf("Reloading config info from '%s' ", consoleCmd[1])
+			e := loadConfig(consoleCmd[1])
+			if e != nil {
+				fmt.Printf("failed. Config info was not changed.")
 			} else {
-				fmt.Printf("Reloading config info from '%s'... ", consoleCmd[1])
-				//TODO: reload config file
 				fmt.Println("done.")
-				fmt.Printf("Connecting to splunk instance at '%s'... ", urlAddr)
-				//TODO: get the client
-				fmt.Println("connected.")
 			}
 		case "exit":
 			return
 		case "file":
 			if len(consoleCmd) != 2 {
-				consoleUsage()
-			} else {
-				file = consoleCmd[1]
-				fmt.Printf("Data will now be output to '%s'.\n", file)
+				printConsoleHelp()
+				continue
 			}
+			file = consoleCmd[1]
+			fmt.Printf("Data will now be output to '%s'.\n", file)
 		case "output":
-			if len(consoleCmd) != 2 || !isValidOutputType(consoleCmd[1]) {
-				consoleUsage()
+			if len(consoleCmd) != 2 {
+				printConsoleHelp()
+				continue
+			}
+			if !isValidOutputType(consoleCmd[1]) {
+				printConsoleHelp()
 			} else {
 				output = consoleCmd[1]
 				fmt.Printf("Data will now be output as %s.\n", strings.ToUpper(output))
 			}
-		case "query":
-			if file == "" {
-				fmt.Fprintln(os.Stdout, "Somthing was output")
-			} else {
-				ioutil.WriteFile(file, []byte("Something was output"), 0644)
+		case "port":
+			if len(consoleCmd) != 2 {
+				printConsoleHelp()
+				continue
 			}
+			tmp := consoleCmd[1]
+			if _, e := strconv.Atoi(tmp); e != nil {
+				fmt.Printf("The provided port '%s' is not valid. Keeping previous value of %s.\n", tmp, port)
+			} else {
+				port = consoleCmd[1]
+				fmt.Printf("Now using port %s to connect to '%s'.\n", port, urlAddr)
+			}
+		case "query":
+			if len(consoleCmd) < 2 {
+				printConsoleHelp()
+				continue
+			}
+			query = strings.Join(consoleCmd[1:], " ")
+			resp := sendHTTPRequest()
+			writeHTTPResponse(file, resp)
+		case "status":
+			if len(consoleCmd) != 1 {
+				printConsoleHelp()
+				continue
+			}
+			printStatus()
 		default:
-			consoleHelp()
+			printConsoleHelp()
 		}
 	}
-}
-
-/* This function prints an incorrect usage notification and then prints the
- * consoleHelp message output.
- * @params - none
- * @return - none
- */
-func consoleUsage() {
-	fmt.Println("Incorrect command usage - see 'Help' below.")
-	consoleHelp()
-	return
-}
-
-/* This function takes a URL string and returns an HTTP client for that URL.
- * If the client already exists, the old one is replaced when this function is
- * called, otherwise a new client is returned.
- * @params - //TODO
- * @return - none
- */
-func getClient(u string) {
-	//TODO
 }
 
 /* This init function handles the parsing of the commandline flags and the
@@ -185,39 +155,9 @@ func init() {
 	pflag.BoolVarP(&inter, "interactive", "i", false, "Use the interactive console for making multiple queries.")
 	pflag.Parse()
 
-	// get the current user context
-	u, _ := user.Current()
-
-	// if a config file was passed in, parse it here
-	if config != "" {
-		viper.SetConfigName(strings.TrimSuffix(filepath.Base(config), filepath.Ext(config)))
-		p, _ := filepath.Abs(filepath.Dir(config))
-		viper.AddConfigPath(p)
-	} else {
-		viper.SetConfigName(DEFAULT_CONFIG_NAME)
-		viper.AddConfigPath(u.HomeDir)
-		viper.AddConfigPath(".")
-	}
-	// ignore error return; bad config info will be caught later
-	e := viper.ReadInConfig()
-	if e != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: provided config file '%s' either does not exist or could not be read.\n", config)
-		os.Exit(ERROR_USER_INPUT)
-	}
-	if un == "" && viper.IsSet("username") {
-		un = viper.GetString("username")
-	}
-	if pw == "" && viper.IsSet("password") {
-		pw = viper.GetString("password")
-	}
-	if urlAddr == "" && viper.IsSet("url") {
-		urlAddr = viper.GetString("url")
-	}
-	// make sure minimal information has been parsed
-	if un == "" || pw == "" || urlAddr == "" {
-		fmt.Fprintf(os.Stderr, "ERROR: one or more pieces of required configuration information were not provided.\n")
-		os.Exit(ERROR_USER_INPUT)
-	}
+	// parse the base info
+	e := loadConfig(config)
+	checkErrorWithExit(e)
 
 	// if not provided, set the port to the splunk default :8089
 	if port == "" {
@@ -243,4 +183,129 @@ func init() {
  */
 func isValidOutputType(t string) bool {
 	return strings.EqualFold("XML", t) || strings.EqualFold("JSON", t) || strings.EqualFold("CSV", t)
+}
+
+/* Loads desired information from the provided config file. Commandline args
+ * take precedence over those passed in from a file at initialization, but
+ * new values should take precedence when reloading the config from the console.
+ * @params - f: a config filepath/filename
+ * @return - an error indicating if something went wrong during processing
+ */
+func loadConfig(f string) error {
+	// get the current user context
+	u, _ := user.Current()
+
+	if f != "" {
+		viper.SetConfigName(strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)))
+		p, _ := filepath.Abs(filepath.Dir(f))
+		viper.AddConfigPath(p)
+	} else {
+		viper.SetConfigName(DEFAULT_CONFIG_NAME)
+		viper.AddConfigPath(u.HomeDir)
+		viper.AddConfigPath(".")
+	}
+	// ignore error return; bad config info will be caught later
+	viper.ReadInConfig()
+	if un == "" && viper.IsSet("username") {
+		un = viper.GetString("username")
+	}
+	if pw == "" && viper.IsSet("password") {
+		pw = viper.GetString("password")
+	}
+	if urlAddr == "" && viper.IsSet("url") {
+		urlAddr = viper.GetString("url")
+	}
+	// make sure minimal information has been parsed
+	if un == "" || pw == "" || urlAddr == "" {
+		return fmt.Errorf("ERROR: one or more pieces of required configuration information were not provided.\n")
+	}
+
+	return nil
+}
+
+/* Prints the 'help' output for use in the console; this should print any time
+ * the user inputs an incorrect command.
+ * @params - none
+ * @return - none
+ */
+func printConsoleHelp() {
+	fmt.Println("Ephor Console Commands:")
+	fmt.Println(" config filename     Reloads the console with the specified config file.")
+	fmt.Println(" exit                Exits the Ephor console.")
+	fmt.Println(" file filename       Writes the output to the specified file.")
+	fmt.Println(" help                Prints this help message.")
+	fmt.Println(" output filetype     Changes the output file type to the specified type (XML/JSON/CSV).")
+	fmt.Println(" port number         Changes the port used to make a connection.")
+	fmt.Println(" query querystring   Runs the specified query and outputs the results.")
+	fmt.Println(" status              Prints out the current configuration information.")
+	return
+}
+
+/* Prints the current state of the application parameter values. This function
+ * is not accessible from the commandline.
+ * @params - none
+ * @return - none
+ */
+func printStatus() {
+	// set the output stream - file or out
+	o := ""
+	if file != "" {
+		o = file
+	} else {
+		o = "Terminal"
+	}
+	// obfuscate the PW by only printing the first 4 chars
+	ob := fmt.Sprintf("%s%s", pw[:4], strings.Repeat("*", len(pw[4:])))
+	fmt.Printf("User Info:\n Username: %s\n Password: %s\nInstance Info:\n URL: %s\n Port: %s\nOutput Info:\n Output Type: %s\n Output Location: %s\n", un, ob, urlAddr, port, output, o)
+}
+
+/* Sends an HTTP request with the set parameters to the splunk server.
+ * @params - none
+ * @return - a byte-slice containing the response data
+ */
+func sendHTTPRequest() []byte {
+	// check if the query was sent
+	if query == "" {
+		fmt.Fprintf(os.Stdout, "No query provided: execution is complete.\n")
+		return nil
+	}
+	requestVals := url.Values{}
+	// trim the quotes around querystrings from the commandline
+	// querystrings used in the API are expected to be of the form 'search index=...'
+	requestVals.Add("search", fmt.Sprintf("search %s", query))
+	requestVals.Add("output_mode", output)
+	requestVals.Add("exec_mode", "oneshot")
+	fmt.Println(query)
+	fmt.Println(requestVals)
+	requestURL := fmt.Sprintf("%s:%s%s", strings.TrimSuffix(urlAddr, "/"), port, SINGLE_SEARCH_ENDPOINT)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+	request, _ := http.NewRequest("POST", requestURL, bytes.NewBufferString(requestVals.Encode()))
+	request.SetBasicAuth(un, pw)
+	resp, err := client.Do(request)
+	checkErrorWithPanic(err)
+	defer resp.Body.Close()
+	body, err := ioutil.ReadAll(resp.Body)
+	checkErrorWithPanic(err)
+
+	return body
+}
+
+/* if the filename is provided, writes the output to file; if not, writes
+ * output to Stdout. A write will not be attempted if the byte-slice param
+ * is nil.
+ * @params - f: a filename string
+ *			 o: a byte-slice of output data
+ * @return - none
+ */
+func writeHTTPResponse(f string, o []byte) {
+	if o != nil {
+		if f != "" {
+			ioutil.WriteFile(f, o, 0644)
+		} else {
+			fmt.Fprintln(os.Stdout, string(o))
+		}
+	}
 }

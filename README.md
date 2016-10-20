@@ -25,7 +25,5 @@ Sample JSON config file:
   ```
 The information can be in any order, as long as it exists. More configuration options will likely be available in the future.
 
-## Features
-+ easy to configure set-up
-+ the ability to quickly change credentials/roles by using a different config file
-+ an 'interactive mode' where the user can execute multiple queries in a row (coming soon!)
+## Console
+The Ephor 'console' is a simple mode where queries can be excuted quickly in sequence, without having to re-provide credentials and setting query options. The console requires the same basic information (see Configuration above), and it can be passed in via a config file or the commandline, as with the one-time mode. Config information can be changed for subsequent queries by loading a new config file.

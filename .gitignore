@@ -22,3 +22,14 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+.DS_Store
+
+# ignore config/output info files
+*.json
+*.toml
+*.yaml
+*.xml
+
+# ignore built executable
+ephor
